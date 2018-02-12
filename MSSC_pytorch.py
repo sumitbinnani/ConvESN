@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import torch.nn.functional as F
 
+from sklearn.utils import shuffle
+
 import reservoir
 import utils
 
@@ -63,6 +65,18 @@ batch_size = 8
 n_epochs = 300
 learning_rate = 0.001
 
+# ============================== Batch processing ============================================
+def get_next_batch(X, y):
+	batch_X = []
+	batch_y = []
+	for i in range(y.shape[0]):
+		batch_X.append(X[i])
+		batch_y.append(y[i])
+		if (i+1)%batch_size==0:
+			yield(np.array(batch_X), np.array(batch_y))
+			batch_X = []
+			batch_y = []
+
 # ============================== Conv-decoder ================================================
 class Decoder(nn.Module):
 	def __init__(self):
@@ -78,21 +92,21 @@ class Decoder(nn.Module):
 			nn.ReLU()))
 
 			self.LL.append(nn.Sequential( # left leg features
-			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
+			nn.Conv2d(1, n_filters, (width, sliding_height), stride=strides),
 			nn.ReLU()))
 
 			self.RL.append(nn.Sequential( # right leg features
-			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
+			nn.Conv2d(1, n_filters, (width, sliding_height), stride=strides),
 			nn.ReLU()))
 
 			self.Trunk.append(nn.Sequential( # central trunk features
-			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
+			nn.Conv2d(1, n_filters, (width, sliding_height), stride=strides),
 			nn.ReLU()))
 
-			self.merge_hands = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
-			self.merge_legs = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
-			self.merge_body = nn.Linear(n_filters*len(sliding_width)*3, n_filters*len(sliding_width))
-			self.final_fc = nn.Linear(n_filters*len(sliding_width), num_classes)
+		self.merge_hands = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
+		self.merge_legs = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
+		self.merge_body = nn.Linear(n_filters*len(sliding_width)*3, n_filters*len(sliding_width))
+		self.final_fc = nn.Linear(n_filters*len(sliding_width), num_classes)
 
 	def forward(self, X):
 		la, ra, ll, rl, trunk = [],[],[],[],[]
@@ -133,22 +147,28 @@ class Decoder(nn.Module):
 model = Decoder()
 criterion = nn.CrossEntropyLoss() # loss
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) # Adam optimizer as in paper
-X = Variable(torch.from_numpy(np.array(echo_states_train))) # shape=(5, n_examples, 1, time_frames, n_res)
-y = Variable(torch.from_numpy(labels_train).long())
+echo_states_train = np.transpose(echo_states_train, (1, 0, 2, 3, 4))
 for epoch in range(n_epochs):
-	optimizer.zero_grad() # clears the gradients of all optimized Variable
-	predictions = model(X)
-	loss = criterion(predictions, y) # y should NOT be one-hot
-	loss.backward()
-	optimizer.step()
-	print 'Epoch', epoch, 'Loss', loss.data[0] # Final loss is around 0.144
+	shuffle(echo_states_train, labels_train)
+	for iteratn, (batch_X, batch_y) in enumerate(get_next_batch(echo_states_train, labels_train)):
+		batch_X = np.transpose(batch_X, (1, 0, 2, 3, 4))
+		X = Variable(torch.from_numpy(batch_X))
+		y = Variable(torch.from_numpy(batch_y).long())
+		optimizer.zero_grad() # clears the gradients of all optimized Variable
+		predictions = model(X)
+		loss = criterion(predictions, y) # y should NOT be one-hot
+		loss.backward()
+		optimizer.step()
+		print 'Epoch', epoch, 'Iteration', iteratn, 'Loss', loss.data[0] # Final loss is around 0.159
 
 # ============================= Training evaluation ==================================
+echo_states_train = np.transpose(echo_states_train, (1, 0, 2, 3, 4))
+X = Variable(torch.from_numpy(echo_states_train))
 y_train = torch.from_numpy(labels_train).long()
 predictions = model(X)
 _, predictions = torch.max(predictions.data, 1)
 accuracy = (predictions == y_train).sum()
-print 'Train Accuracy', accuracy*1.0/num_samples_train # Train accuracy is approx 97.8%
+print 'Train Accuracy', accuracy*1.0/num_samples_train # Train accuracy is approx 99.24%
 
 # ================================ Testing ===========================================
 X_test = Variable(torch.from_numpy(np.array(echo_states_test)))
@@ -157,4 +177,4 @@ model.eval()
 predictions = model(X_test)
 _, predictions = torch.max(predictions.data, 1)
 accuracy = (predictions == y_test).sum()
-print 'Test Accuracy', accuracy*1.0/num_samples_test # Test accuracy is approx 89.3%
+print 'Test Accuracy', accuracy*1.0/num_samples_test # Test accuracy is approx 83.9%
