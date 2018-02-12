@@ -141,7 +141,14 @@ for epoch in range(n_epochs):
 	loss = criterion(predictions, y) # y should NOT be one-hot
 	loss.backward()
 	optimizer.step()
-	print 'Epoch', epoch, 'Loss', loss.data[0]
+	print 'Epoch', epoch, 'Loss', loss.data[0] # Final loss is around 0.144
+
+# ============================= Training evaluation ==================================
+y_train = torch.from_numpy(labels_train).long()
+predictions = model(X)
+_, predictions = torch.max(predictions.data, 1)
+accuracy = (predictions == y_train).sum()
+print 'Train Accuracy', accuracy*1.0/num_samples_train # Train accuracy is approx 97.8%
 
 # ================================ Testing ===========================================
 X_test = Variable(torch.from_numpy(np.array(echo_states_test)))
@@ -150,6 +157,4 @@ model.eval()
 predictions = model(X_test)
 _, predictions = torch.max(predictions.data, 1)
 accuracy = (predictions == y_test).sum()
-print accuracy, num_samples_test
-print 'Accuracy', accuracy*1.0/num_samples_test
-# print y_test, predictions
+print 'Test Accuracy', accuracy*1.0/num_samples_test # Test accuracy is approx 89.3%
