@@ -36,7 +36,7 @@ num_samples_test = labels_test.shape[0]
 _, time_length, n_in = skeletons_train[0].shape # time_length = number of time frames, =67
 n_res = n_in * 3 # hyperparameter
 IS = 0.1
-SR = 0.99 # 0.99 according to the paper
+SR = 0.9 # 0.99 according to the paper, 0.9 gives best
 sparsity = 0.3 # isnt this alpha in the paper, then it should be 0.01
 leakyrate = 1.0
 
@@ -75,30 +75,31 @@ class Decoder(nn.Module):
 
 			self.RA.append(nn.Sequential( # right arm features
 			nn.Conv2d(1, n_filters, (width, sliding_height), stride=strides),
-			nn.ReLU(),
-			nn.MaxPool2d(2)))
+			nn.ReLU()))
 
 			self.LL.append(nn.Sequential( # left leg features
 			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
-			nn.ReLU(),
-			nn.MaxPool2d(2)))
+			nn.ReLU()))
 
 			self.RL.append(nn.Sequential( # right leg features
 			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
-			nn.ReLU(),
-			nn.MaxPool2d(2)))
+			nn.ReLU()))
 
 			self.Trunk.append(nn.Sequential( # central trunk features
 			nn.Conv2d(1, n_filters, (sliding_width[0], sliding_height), stride=strides),
-			nn.ReLU(),
-			nn.MaxPool2d(2)))
+			nn.ReLU()))
 
+			self.merge_hands = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
+			self.merge_legs = nn.Linear(2*n_filters*len(sliding_width), n_filters*len(sliding_width))
+			self.merge_body = nn.Linear(n_filters*len(sliding_width)*3, n_filters*len(sliding_width))
+			self.final_fc = nn.Linear(n_filters*len(sliding_width), num_classes)
 
 	def forward(self, X):
 		la, ra, ll, rl, trunk = [],[],[],[],[]
 		for i in range(len(sliding_width)):
 			this_la = self.LA[i](X[0,:,:,:])
 			this_la = F.max_pool2d(this_la, kernel_size=this_la.size()[2:]) # max pool across all time steps
+			# print this_la.shape # shape=(num_examples, n_filters, 1, 1)
 			la.append(this_la)
 			this_ra = self.RA[i](X[1,:,:,:])
 			this_ra = F.max_pool2d(this_ra, kernel_size=this_ra.size()[2:])
@@ -109,17 +110,46 @@ class Decoder(nn.Module):
 			this_rl = self.RL[i](X[3,:,:,:])
 			this_rl = F.max_pool2d(this_rl, kernel_size=this_rl.size()[2:])
 			rl.append(this_rl)
+			this_trunk = self.Trunk[i](X[4,:,:,:])
+			this_trunk = F.max_pool2d(this_trunk, kernel_size=this_trunk.size()[2:])
+			trunk.append(this_trunk)
 
-		# hand_features = 
+		la = torch.cat(la, dim=1) # shape = (num_examples, n_filters*len(sliding_width))
+		ra = torch.cat(ra, dim=1) # same shape as above
+		hand_features = self.merge_hands(torch.cat([la, ra], dim=1)[:,:,0,0]) # shape = (num_examples, n_filters*len(sliding_width))
 
-# =========================== Training and Testing =========================================
+		ll = torch.cat(ll, dim=1)
+		rl = torch.cat(rl, dim=1)
+		leg_features = self.merge_legs(torch.cat([ll, rl], dim=1)[:,:,0,0])
+
+		trunk_features = torch.cat(trunk, dim=1)[:,:,0,0] # shape = (num_examples, n_filters*len(sliding_width))
+
+		body_features = self.merge_body(torch.cat([hand_features, leg_features, trunk_features], dim=1)) # shape = (num_examples, n_filters*len(sliding_width))
+
+		output = self.final_fc(body_features)
+		return output
+
+# ================================ Training =========================================
 model = Decoder()
 criterion = nn.CrossEntropyLoss() # loss
-# optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) # Adam optimizer as in paper
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) # Adam optimizer as in paper
 X = Variable(torch.from_numpy(np.array(echo_states_train))) # shape=(5, n_examples, 1, time_frames, n_res)
-y = Variable(torch.from_numpy(labels_train))
-X_test = Variable(torch.from_numpy(np.array(echo_states_test)))
-y_test = Variable(torch.from_numpy(labels_test))
+y = Variable(torch.from_numpy(labels_train).long())
 for epoch in range(n_epochs):
 	optimizer.zero_grad() # clears the gradients of all optimized Variable
-	outputs = model(X)
+	predictions = model(X)
+	loss = criterion(predictions, y) # y should NOT be one-hot
+	loss.backward()
+	optimizer.step()
+	print 'Epoch', epoch, 'Loss', loss.data[0]
+
+# ================================ Testing ===========================================
+X_test = Variable(torch.from_numpy(np.array(echo_states_test)))
+y_test = torch.from_numpy(labels_test).long()
+model.eval()
+predictions = model(X_test)
+_, predictions = torch.max(predictions.data, 1)
+accuracy = (predictions == y_test).sum()
+print accuracy, num_samples_test
+print 'Accuracy', accuracy*1.0/num_samples_test
+# print y_test, predictions
