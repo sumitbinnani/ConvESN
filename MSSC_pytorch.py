@@ -155,7 +155,7 @@ criterion = nn.CrossEntropyLoss() # loss
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) # Adam optimizer as in paper
 echo_states_train = np.transpose(echo_states_train, (1, 0, 2, 3, 4))
 for epoch in range(n_epochs):
-	shuffle(echo_states_train, labels_train)
+	echo_states_train, labels_train = shuffle(echo_states_train, labels_train)
 	for iteratn, (batch_X, batch_y) in enumerate(get_next_batch(echo_states_train, labels_train)):
 		batch_X = np.transpose(batch_X, (1, 0, 2, 3, 4))
 		X = Variable(torch.from_numpy(batch_X))
