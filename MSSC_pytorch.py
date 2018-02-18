@@ -19,15 +19,14 @@ a .p file is a list: [left_hand_skeleton, right_hand_skeleton, left_leg_skeleton
 the shape of the first five ones: (num_samples, time_length, num_joints)
 the shape of the last one: (num_samples,)
 """
-filepath_train = '../dataset/MSRAction3D_real_world_P4_Split_AS3_train.p'
-filepath_test = '../dataset/MSRAction3D_real_world_P4_Split_AS3_test.p'
+filepath_train = '../dataset_padded/MSRAction3D_real_world_P4_Split_AS3_train.p'
+filepath_test = '../dataset_padded/MSRAction3D_real_world_P4_Split_AS3_test.p'
 data_train = cp.load(open(filepath_train, 'rb'))
 skeletons_train = data_train[0:5]
 labels_train = data_train[5]
 data_test = cp.load(open(filepath_test, 'rb'))
 skeletons_test = data_test[0:5]
 labels_test = data_test[5]
-
 print 'Transfering labels...'
 labels_train, labels_test, num_classes = utils.transfer_labels(labels_train, labels_test)
 
@@ -35,7 +34,7 @@ labels_train, labels_test, num_classes = utils.transfer_labels(labels_train, lab
 num_samples_train = labels_train.shape[0]
 num_samples_test = labels_test.shape[0]
 
-_, time_length, n_in = skeletons_train[0].shape # time_length = number of time frames, =67
+_, time_length, n_in = skeletons_train[0].shape # time_length = number of time frames, = 67
 n_res = n_in * 3 # hyperparameter
 IS = 0.1
 SR = 0.9 # 0.99 according to the paper, 0.9 gives best
@@ -131,7 +130,7 @@ class Decoder(nn.Module):
 		la = torch.cat(la, dim=1) # shape = (num_examples, n_filters*len(sliding_width))
 		ra = torch.cat(ra, dim=1) # same shape as above
 		hand_features = self.merge_hands(torch.cat([la, ra], dim=1)[:,:,0,0]) # shape = (num_examples, n_filters*len(sliding_width))
-
+		
 		ll = torch.cat(ll, dim=1)
 		rl = torch.cat(rl, dim=1)
 		leg_features = self.merge_legs(torch.cat([ll, rl], dim=1)[:,:,0,0])
@@ -143,8 +142,15 @@ class Decoder(nn.Module):
 		output = self.final_fc(body_features)
 		return output
 
+def weights_init(m):
+	classname = m.__class__.__name__
+	if classname.find('Linear') != -1: # lecun uniform initialization
+		m.weight.data.uniform_(-np.sqrt(3. / m.in_features), np.sqrt(3. / m.in_features))
+
 # ================================ Training =========================================
 model = Decoder()
+model.apply(weights_init)
+
 criterion = nn.CrossEntropyLoss() # loss
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate) # Adam optimizer as in paper
 echo_states_train = np.transpose(echo_states_train, (1, 0, 2, 3, 4))
